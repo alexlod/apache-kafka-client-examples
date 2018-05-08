@@ -9,16 +9,16 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.errors.InterruptException;
+import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ConsumeToDownstream {
-
   private static final Logger log = LoggerFactory.getLogger(ConsumeToDownstream.class);
 
   public static final long SHORTEST_COMMIT_INTERVAL_MS = 3000;
@@ -36,6 +36,8 @@ public class ConsumeToDownstream {
 
     // committing configuration.
     props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+
+    // where to get started when the consumer first starts (and hasn't committed any offsets yet).
     props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
     return new KafkaConsumer<>(props);
@@ -45,7 +47,15 @@ public class ConsumeToDownstream {
     Consumer<String, String> consumer = createConsumer();
     consumer.subscribe(Collections.singletonList(RESTProducer.TOPIC));
 
-    Runtime.getRuntime().addShutdownHook(new Thread(consumer::wakeup));
+    // graceful shutdown.
+    AtomicBoolean shutdownReady = new AtomicBoolean(false);
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+      log.info("Starting graceful shutdown.");
+      consumer.wakeup();
+
+      while (! shutdownReady.get()) {}
+      log.info("Graceful shutdown complete.");
+    }));
 
     Producer<String, String> deadLetterProducer = RESTProducer.createProducer();
     long lastCommitTimeMs = -1;
@@ -74,7 +84,7 @@ public class ConsumeToDownstream {
           }
 
           try {
-            // in this simple example, the way a message is passed downstream is to just log it.
+            // in this simple example, the way a message is "passed downstream" is to just log it.
             // in a real-world example, the message would go somewhere, for example to a database,
             // another topic, another microservice, or any other downstream destination.
             log.info("Consumed message with offset: " + record.offset());
@@ -89,8 +99,8 @@ public class ConsumeToDownstream {
             // continuing to retry the downstream system until it's back up. This solution is much trickier
             // because the following considerations need to be taken into account:
             //  * poll() needs to be called periodically to avoid the consumer timing out with the
-            //    group coordinator, which would cause a rebalance. max.poll.interval.ms controls
-            //    the poll() timeout.
+            //    group coordinator, which would cause a consumer group rebalance.
+            //    max.poll.interval.ms controls the poll() timeout.
             //  * pause() needs to be used so poll() can be called to trigger the heartbeat,
             //    but not return any messages.
             //  * a health check needs to be performed on the downstream system to know when resume()
@@ -114,11 +124,12 @@ public class ConsumeToDownstream {
           }
         }
       }
-    } catch (InterruptException ie) {
+    } catch (WakeupException we) {
       // do nothing because the consumer is closing.
     } finally {
-      log.info("Shutting down the consumer gracefully.");
       consumer.close();
+      deadLetterProducer.close();
+      shutdownReady.set(true);
     }
   }
 }

@@ -126,11 +126,10 @@ public class RESTProducer {
   }
 
   public void stop() {
-    log.info("Initiating graceful shutdown.");
+    log.info("Starting graceful shutdown.");
     if (server != null) {
       try {
         server.stop();
-        log.info("Jetty server shutdown.");
       } catch (Exception e) {
         log.error("Couldn't stop Jetty server: ", e);
       }
@@ -140,7 +139,7 @@ public class RESTProducer {
       producer.close();
     }
 
-    log.info("Producer shutdown");
+    log.info("Graceful shutdown complete.");
   }
 
   public static void main(String[] args) {
