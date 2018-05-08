@@ -22,13 +22,17 @@ import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
 
+/*
+ This example producer shows how to not lose messages, maintain ordering, and
+ how to deal with back pressure in the event that Kafka is unavailable.
+ */
 @Path("/")
 public class RESTProducer {
   private static final Logger log = LoggerFactory.getLogger(RESTProducer.class);
 
   public static final int HTTP_PORT = 8080;
-  public static final String TOPIC = "my-test-topic";
-  // NOTE: in production, the topic's min.insync.replicas setting should be set to 2,\
+  public static final String TOPIC = "rest-topic";
+  // NOTE: in production, the topic's min.insync.replicas setting should be set to 2,
   //       and its replication factor should be set to 3.
 
   private Server server;
@@ -47,10 +51,11 @@ public class RESTProducer {
     // no data loss configuration (note that to not lose messages you also need to handle
     // errors correctly when calling send() -- see comments below).
     props.put(ProducerConfig.RETRIES_CONFIG, 100);
-    props.put(ProducerConfig.RETRY_BACKOFF_MS_CONFIG, 100);
+    props.put(ProducerConfig.RETRY_BACKOFF_MS_CONFIG, 100); // RETRIES * RETRY_BACKOFF should be greater than
+                                                            // the broker's zookeeper.session.timeout.ms
     props.put(ProducerConfig.ACKS_CONFIG, "all");
 
-    // message ordering configuration.
+    // ensure message ordering is maintained when a message fails and is retried.
     props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
 
     return new KafkaProducer<>(props);
@@ -59,7 +64,7 @@ public class RESTProducer {
   public RESTProducer() {
     producer = createProducer();
 
-    // setup Jersey.
+    // setup a basic, single-threaded Jersey server.
     server = new Server(HTTP_PORT);
     ResourceConfig resourceConfig = new ResourceConfig();
     resourceConfig.register(this);
@@ -85,27 +90,18 @@ public class RESTProducer {
   Each of these options has downsides. Buffering in memory means you can lose messages
   if the REST service fails. Buffering on disk offers slightly better durability than
   memory but messages could still be lost if storage is lost. Buffering to a separate
-  Kafka cluster requires consumers to be aware of multiple clusters such that some
-  messages are on one cluster and other messages are on the other cluster -- this is
-  very non-trivial.
+  Kafka cluster requires consumers to be aware of multiple clusters in such a way that
+  some messages are on one cluster and other messages are on the other cluster -- this
+  is very non-trivial.
 
-  WARNING: this REST service is single-threaded, which means its throughput will be quite
+  NOTE: this REST service is single-threaded, which means its throughput will be quite
   bad given each request blocks until an acknowledgment is received. In a production
   environment this service should be multi-threaded to increase throughput. A multi-threaded
   design could be achieved either with a producer per thread, or with all threads sharing
   a single producer. The former option will scale better because each producer instance
   has a single IO thread. Note that send() can be passed a callback to use the
-  producer in an asynchronous design. In an asynchronous design, you may also want to
-  experiment with batching and compression. See the following config options:
-    * linger.ms to control the maximum time to wait for a batch.
-    * batch.size to control the maximum batch size.
-    * compression.type to control the compression type of the entire batch.
-
-  Batching and compression settings should be tuned based on the application's requirements.
-  Reasonable, arbitrary starting points could be:
-     * linger.ms=50
-     * batch.size=100000
-     * compression.type="snappy"
+  producer asynchronously. In an asynchronous design, you may also want to experiment with batching
+  and compression. See HighThroughputLossyProducer for an example.
    */
   @GET
   @Produces(MediaType.TEXT_PLAIN)
@@ -150,6 +146,7 @@ public class RESTProducer {
   public static void main(String[] args) {
     RESTProducer server = new RESTProducer();
 
+    // graceful shutdown.
     Runtime.getRuntime().addShutdownHook(new Thread(server::stop));
 
     server.start();
