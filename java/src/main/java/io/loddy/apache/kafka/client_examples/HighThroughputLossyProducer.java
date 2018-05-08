@@ -127,7 +127,7 @@ public class HighThroughputLossyProducer {
             // this is where the producer is lossy. When a message has exceeded its retries, or
             // when the message fails to produce and isn't retry-able (eg a message that is too large),
             // this producer simply logs an error message, effectively losing the message.
-            log.error("Message couldn't be produced. Message:\n%s\nError:%s", metadata, error);
+            log.error("Message couldn't be produced.", error);
           }
         });
       }
