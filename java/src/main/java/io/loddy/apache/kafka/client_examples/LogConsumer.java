@@ -18,8 +18,8 @@ import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class ConsumeToDownstream {
-  private static final Logger log = LoggerFactory.getLogger(ConsumeToDownstream.class);
+public class LogConsumer {
+  private static final Logger log = LoggerFactory.getLogger(LogConsumer.class);
 
   public static final long SHORTEST_COMMIT_INTERVAL_MS = 3000;
 
